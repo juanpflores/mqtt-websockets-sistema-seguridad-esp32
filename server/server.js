@@ -25,6 +25,72 @@ const io = new Server(server, {
         origin: "*"
     }
 })
+let latestFrame = null;
+let cameraClients = new Set();
+
+app.post(
+    '/camera/upload',
+    express.raw({
+        type: 'image/jpeg',
+        limit: '2mb'
+    }),
+    (req, res) => {
+
+        if (!req.body || req.body.length === 0) {
+            return res.sendStatus(400);
+        }
+        latestFrame = Buffer.from(req.body);
+        for (const client of cameraClients) {
+            try {
+                client.write(
+                    `--frame\r\n` +
+                    `Content-Type: image/jpeg\r\n` +
+                    `Content-Length: ${latestFrame.length}\r\n\r\n`
+                );
+                client.write(latestFrame);
+                client.write('\r\n');
+
+            } catch (error) {
+                cameraClients.delete(client);
+            }
+        }
+
+        res.sendStatus(200);
+    }
+);
+
+
+app.get('/camera/stream', (req, res) => {
+
+    res.writeHead(200, {
+        'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Connection': 'keep-alive'
+    });
+
+    cameraClients.add(res);
+
+
+    // Si ya existe un frame, mandarlo inmediatamente
+    if (latestFrame) {
+
+        res.write(
+            `--frame\r\n` +
+            `Content-Type: image/jpeg\r\n` +
+            `Content-Length: ${latestFrame.length}\r\n\r\n`
+        );
+
+        res.write(latestFrame);
+        res.write('\r\n');
+    }
+
+    req.on('close', () => {
+
+        cameraClients.delete(res);
+    });
+});
 // iniciando mqtt y websocket
 clientmqtt.on("connect", () => {
     clientmqtt.subscribe([
